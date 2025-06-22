@@ -18,10 +18,10 @@ Features:
 
 import shutil
 import hashlib
+import ffmpeg
 from pathlib import Path
 from datetime import datetime
 import csv
-import subprocess
 from PIL import Image
 import piexif
 from pillow_heif import register_heif_opener
@@ -29,12 +29,14 @@ from collections import defaultdict
 register_heif_opener()  
 
 # ──────── Configuration ─────────
-RAW_DIRS               = [r"E:\Photos\Unsorted"]       # Input folders
-PROCESSED_DIR          = r"E:\Photos\processed"   # Output base folder
-RUN_EVALUATE           = True          # Run evaluation stage
+RAW_DIRS               = [r"E:\raw"]        # Input folders
+PROCESSED_DIR          = r"E:\Photos"   # Output base folder
+DUPLICATES_DIR         = r"E:\raw\zzduplicate"       # Folder to move duplicates to
+RUN_EVALUATE           = False          # Run evaluation stage
+RUN_MOVE_DUPLICATES    = False        # Run duplicate moving stage
 RUN_PROCESS            = True          # Run processing stage
 SKIP_LIVE_PHOTO_CLIPS  = True          # Skip .MOV files paired with .HEIC
-EXCLUDE_EXTS           = [".aae"]      # File extensions to exclude in evaluation
+EXCLUDE_EXTS           = [".aae", ".nomedia"]      # File extensions to exclude in evaluation
 # ─────────────────────────────────
 
 EVAL_LOG = "evaluation_log.csv"
@@ -146,6 +148,24 @@ def get_exif_date_taken(file_path):
         pass
     return None
 
+def get_mp4_creation_time(file_path):
+    """
+    Extract creation_time from MP4 metadata using ffmpeg-python package.
+    Faster than subprocess calls to ffprobe.
+    """
+    try:
+        # Use ffmpeg.probe instead of subprocess
+        probe = ffmpeg.probe(str(file_path))
+        creation_time_str = probe.get('format', {}).get('tags', {}).get('creation_time')
+        
+        if creation_time_str:
+            # Parse ISO format: "2023-10-27T18:23:32.000000Z"
+            creation_time_str = creation_time_str.replace('Z', '').split('.')[0]
+            return datetime.fromisoformat(creation_time_str)
+    except Exception as e:
+        print(f"Error extracting MP4 creation time from {file_path}: {e}")
+    return None
+
 def gather_all_files(raw_dirs):
     """
     Recursively collect all files under each raw_dir.
@@ -231,6 +251,9 @@ def evaluate():
         dt = None
         if f.suffix.lower() in [".jpg", ".jpeg", ".tiff", ".png", ".heic"]:
             dt = get_exif_date_taken(f)
+        # Add MP4 support
+        elif f.suffix.lower() in [".mp4", ".mov"]:
+            dt = get_mp4_creation_time(f)
         # Fallback to earliest of file times
         if not dt:
             timestamps = []
@@ -316,7 +339,7 @@ def evaluate():
 
 def process():
     """
-    Processing stage:
+    Processing stage with ffmpeg-python for conversions:
      - Read evaluation_log.csv.
      - For each pending entry with import=True, convert or copy and move to processed/YYYY/.
      - Update status in CSV.
@@ -346,12 +369,39 @@ def process():
 
         try:
             if row["convert"] == "True":
-                subprocess.run(
-                    ["ffmpeg", "-i", str(src), str(target)],
-                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
+                # Use ffmpeg-python instead of subprocess
+                input_ext = src.suffix.lower()
+                
+                if input_ext == ".heic":
+                    # HEIC to JPG conversion
+                    (
+                        ffmpeg
+                        .input(str(src))
+                        .output(str(target), vcodec='mjpeg', q=2)
+                        .overwrite_output()
+                        .run(quiet=True)
+                    )
+                elif input_ext == ".mov":
+                    # MOV to MP4 conversion
+                    (
+                        ffmpeg
+                        .input(str(src))
+                        .output(str(target), vcodec='libx264', acodec='aac', preset='fast')
+                        .overwrite_output()
+                        .run(quiet=True)
+                    )
+                else:
+                    # Default conversion
+                    (
+                        ffmpeg
+                        .input(str(src))
+                        .output(str(target))
+                        .overwrite_output()
+                        .run(quiet=True)
+                    )
             else:
                 shutil.copy2(src, target)
+                
             row["status"] = "done"
             print(f"Processed: {src.name} -> {target.name}")
         except Exception as e:
@@ -368,8 +418,80 @@ def process():
     else:
         print("No pending items to process.")
 
+def move_duplicates():
+    """
+    Move duplicate files to a separate duplicates folder.
+    Reads evaluation_log.csv and moves files marked as duplicates.
+    Uses cut (move) operation instead of copy to remove duplicates from raw folders.
+    All duplicates are dumped into a single folder without year organization.
+    """
+    if not Path(EVAL_LOG).exists():
+        print("ERROR: Run evaluation first to generate evaluation log.")
+        return
+
+    rows = []
+    with open(EVAL_LOG, newline="", encoding="utf-8") as csvf:
+        for row in csv.DictReader(csvf):
+            rows.append(row)
+
+    # Filter for duplicate files only
+    duplicate_rows = [row for row in rows if row["status"] == "duplicate"]
+    
+    if not duplicate_rows:
+        print("No duplicate files found to move.")
+        return
+
+    print(f"Found {len(duplicate_rows)} duplicate files to move...")
+    
+    # Create duplicates directory
+    base_duplicates = Path(DUPLICATES_DIR)
+    base_duplicates.mkdir(exist_ok=True)
+    
+    moved_count = 0
+    error_count = 0
+    
+    for i, row in enumerate(duplicate_rows, 1):
+        src = Path(row["source"])
+        
+        # Progress logging
+        if i % 100 == 0 or i == len(duplicate_rows):
+            print(f"Moving progress: {i} / {len(duplicate_rows)} duplicates processed")
+        
+        if not src.exists():
+            print(f"Warning: Source file not found: {src}")
+            continue
+            
+        try:
+            # Use original filename - dump all into single duplicates folder
+            target = base_duplicates / src.name
+            
+            # Handle filename conflicts by adding counter
+            counter = 1
+            original_target = target
+            while target.exists():
+                stem = original_target.stem
+                suffix = original_target.suffix
+                target = base_duplicates / f"{stem}_dup{counter:03d}{suffix}"
+                counter += 1
+            
+            # Move (cut) the file
+            shutil.move(str(src), str(target))
+            print(f"Moved: {src.name} -> {target.name}")
+            moved_count += 1
+            
+        except Exception as e:
+            print(f"Error moving {src}: {e}")
+            error_count += 1
+    
+    print(f"\nDuplicate moving complete:")
+    print(f"Files moved: {moved_count}")
+    print(f"Errors: {error_count}")
+    print(f"Duplicates saved to: {DUPLICATES_DIR}")
+
 if __name__ == "__main__":
     if RUN_EVALUATE:
         evaluate()
+    if RUN_MOVE_DUPLICATES:
+        move_duplicates()
     if RUN_PROCESS:
         process()
