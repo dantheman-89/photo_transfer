@@ -1,254 +1,149 @@
 # Photo Migration Tool
 
-[![Python 3.10.13](https://img.shields.io/badge/python-3.10.13-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
 
-A comprehensive photo and video migration tool that organizes media files chronologically while detecting and handling duplicates intelligently.
+A comprehensive photo and video migration tool that organizes media files chronologically while intelligently detecting and handling both exact and visually similar duplicates.
 
 ## 🎯 Overview
 
-This tool helps you migrate and organize large photo/video collections from multiple raw folders into a structured, chronologically-organized archive. It uses EXIF metadata when available and provides intelligent duplicate detection to prevent data redundancy.
+This tool helps you migrate and organize large photo/video collections from multiple raw folders into a structured, chronologically-organized archive. It uses EXIF metadata for accurate dating and provides a powerful, multi-stage duplicate detection system to prevent data redundancy and clean up compressed copies (e.g., from WhatsApp).
 
 ## ✨ Features
 
-- **📅 Smart Date Detection**: Uses EXIF "Date Taken" metadata when available, falls back to file timestamps
-- **🔍 Intelligent Duplicate Detection**: Efficient file size + hash-based duplicate identification
-- **🔄 Format Conversion**: Automatically converts HEIC to JPG and MOV to MP4 using FFmpeg
-- **📊 Progress Tracking**: Detailed logging and progress reporting throughout the process
-- **⚡ Performance Optimized**: Only calculates hashes for potential duplicates, significantly reducing processing time
-- **📋 CSV Logging**: Comprehensive evaluation logs with import control flags
-- **🎯 Cross-Directory Comparison**: Compares raw files against existing processed files
+- **📅 Smart Date Detection**: Uses EXIF "Date Taken" metadata when available, falls back to file timestamps.
+- **🔍 Advanced Duplicate Detection**:
+    - **Exact Duplicates**: Finds bit-for-bit identical files using MD5 hashing.
+    - **Visually Similar Duplicates**: Uses perceptual hashing (`pHash`) to find compressed versions of photos (e.g., WhatsApp images).
+- **⚡ High-Performance Processing**: Leverages `multiprocessing` to parallelize metadata caching and image feature calculation across all CPU cores.
+- **📊 Real-Time Progress**: Uses `tqdm` to provide clean, detailed progress bars for long-running operations.
+- **🔄 Format Conversion**: Automatically converts HEIC to JPG and MOV to MP4 using FFmpeg.
+- **📋 CSV Logging**: Generates a comprehensive `evaluation_log.csv` with a detailed plan for review and control.
+- **📁 Duplicate Archiving**: Optionally moves all detected duplicates to a separate folder for review or deletion.
 
 ## 🏗️ Architecture
 
-The tool operates in two distinct phases:
+The tool operates in up to three distinct phases, controlled by flags in the configuration:
 
-1. **Evaluation Phase** (`evaluate()`): Analyzes files, detects duplicates, assigns chronological names
-2. **Processing Phase** (`process()`): Performs actual file operations (copy/convert/organize)
+1.  **Evaluation Phase** (`evaluate()`):
+    - Gathers all files from source and destination directories.
+    - Caches file metadata (size, date) in parallel.
+    - Runs a two-stage duplicate detection process.
+    - Generates `evaluation_log.csv` with a detailed plan (`pending`, `duplicate`).
+2.  **Duplicate Moving Phase** (`move_duplicates()`):
+    - Reads `evaluation_log.csv`.
+    - Moves all files marked as `duplicate` to the specified `DUPLICATES_DIR`.
+3.  **Processing Phase** (`process()`):
+    - Reads `evaluation_log.csv`.
+    - Copies or converts all files marked as `pending` into the chronologically structured `PROCESSED_DIR`.
 
 ## 📋 Prerequisites
 
-- Python 3.10.13 or higher
-- FFmpeg (for video conversion)
-- Required Python packages (see [Installation](#installation))
+- Python 3.10 or higher
+- FFmpeg (must be in the system's PATH)
 
 ## 🚀 Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourusername/photo-migration-tool.git
-   cd photo-migration-tool
-   ```
+1.  **Clone the repository**
+    ```bash
+    git clone https://github.com/yourusername/photo-migration-tool.git
+    cd photo-migration-tool
+    ```
 
-2. **Install Python dependencies**
-   ```bash
-   pip install pillow piexif pillow-heif
-   ```
+2.  **Install Python dependencies**
+    ```bash
+    pip install pillow piexif pillow-heif ffmpeg-python numpy imagehash tqdm
+    ```
 
-3. **Install FFmpeg**
-   
-   **Windows:**
-   ```bash
-   # Using chocolatey
-   choco install ffmpeg
-   
-   # Or download from https://ffmpeg.org/download.html
-   ```
-   
-   **macOS:**
-   ```bash
-   brew install ffmpeg
-   ```
-   
-   **Linux:**
-   ```bash
-   sudo apt update
-   sudo apt install ffmpeg
-   ```
+3.  **Install FFmpeg**
+    - **Windows (via Chocolatey):** `choco install ffmpeg`
+    - **macOS (via Homebrew):** `brew install ffmpeg`
+    - **Linux (Debian/Ubuntu):** `sudo apt update && sudo apt install ffmpeg`
+    - Or download from the [official FFmpeg site](https://ffmpeg.org/download.html).
 
 ## ⚙️ Configuration
 
-Edit the configuration section in `photo_migration.py`:
+Edit the configuration section at the top of `photo_migration.py`:
 
 ```python
-# ──────── Configuration ─────────
-RAW_DIRS               = [r"E:\Photos\Unsorted"]       # Input folders
-PROCESSED_DIR          = r"E:\Photos\processed"        # Output base folder
-RUN_EVALUATE           = True                          # Run evaluation stage
-RUN_PROCESS            = True                         # Run processing stage
-SKIP_LIVE_PHOTO_CLIPS  = True                         # Skip .MOV files paired with .HEIC
-EXCLUDE_EXTS           = [".aae"]                      # File extensions to exclude
-# ─────────────────────────────────
+#==================================================================================
+# CONFIGURATION
+#==================================================================================
+
+RAW_DIRS               = [r"E:\Photos\2024"]        # Input folders
+PROCESSED_DIR          = "processed"                 # Output base folder
+DUPLICATES_DIR         = r"E:\Photos\duplicate"       # Folder to move duplicates to
+RUN_EVALUATE           = True                        # Run evaluation stage
+RUN_MOVE_DUPLICATES    = True                        # Run duplicate moving stage
+RUN_PROCESS            = False                       # Run processing stage
+SKIP_LIVE_PHOTO_CLIPS  = True                        # Skip .MOV files paired with .HEIC
+EXCLUDE_EXTS           = [".aae", ".nomedia"]        # File extensions to exclude in evaluation
 ```
 
 ### Configuration Options
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `RAW_DIRS` | List of source directories to scan | `[r"E:\Photos\Unsorted"]` |
-| `PROCESSED_DIR` | Destination directory for organized files | `r"E:\Photos\processed"` |
-| `RUN_EVALUATE` | Enable evaluation phase | `True` |
-| `RUN_PROCESS` | Enable processing phase | `True` |
-| `SKIP_LIVE_PHOTO_CLIPS` | Skip MOV files paired with HEIC Live Photos | `True` |
-| `EXCLUDE_EXTS` | File extensions to ignore during evaluation | `[".aae"]` |
+| Option | Description |
+| :--- | :--- |
+| `RAW_DIRS` | List of source directories to scan for media. |
+| `PROCESSED_DIR` | The main destination directory for organized files. |
+| `DUPLICATES_DIR` | Directory where duplicate files will be moved. |
+| `RUN_EVALUATE` | Enables the evaluation phase. |
+| `RUN_MOVE_DUPLICATES` | Enables the duplicate moving phase. |
+| `RUN_PROCESS` | Enables the final processing/migration phase. |
+| `SKIP_LIVE_PHOTO_CLIPS` | Skips `.MOV` files that are paired with `.HEIC` Live Photos. |
+| `EXCLUDE_EXTS` | File extensions to completely ignore during scanning. |
 
 ## 🎮 Usage
 
-### Basic Workflow
+### Recommended Workflow
 
-1. **Configure** the tool by editing the configuration section
-2. **Run evaluation only** (`RUN_PROCESS = False`) to analyze files and generate processing plan
-3. **Review** the `evaluation_log.csv` file to verify the plan
-4. **Run processing** (`RUN_PROCESS = True`) to execute the migration
+1.  **Configure** the script, setting your `RAW_DIRS`, `PROCESSED_DIR`, and `DUPLICATES_DIR`.
+2.  **Run Evaluation**: Set `RUN_EVALUATE = True` and the other two flags to `False`. Run the script.
+    ```bash
+    python photo_migration.py
+    ```
+3.  **Review Plan**: Open the generated `evaluation_log.csv`. Carefully check which files are marked as `pending` and which are `duplicate`.
+4.  **Move Duplicates (Optional)**: If you are satisfied with the duplicate list, set `RUN_MOVE_DUPLICATES = True` and `RUN_EVALUATE = False`. Run the script again to archive the duplicates.
+5.  **Process Files**: Finally, set `RUN_PROCESS = True` and the other flags to `False`. Run the script to perform the final migration of `pending` files.
 
-### Step-by-Step Usage
+**⚠️ Important Safety Note:** Always back up your original files before running the `RUN_MOVE_DUPLICATES` or `RUN_PROCESS` stages. The `RUN_EVALUATE` stage is completely safe and only reads files.
 
-**Step 1: Initial Setup and Evaluation**
+## 🔍 Duplicate Detection Logic
 
-Ensure `RUN_PROCESS = False` in your configuration to run evaluation only:
+The tool uses a powerful two-phase process to find duplicates:
 
-```python
-# In photo_migration.py configuration section
-RUN_EVALUATE = True   # Generate evaluation plan
-RUN_PROCESS  = False  # Don't execute file operations yet
-```
+1.  **Phase 1: Exact Duplicates**
+    - Groups all files by exact file size.
+    - For files with matching sizes, it calculates a full MD5 hash.
+    - Files with the same hash are marked as exact duplicates.
 
-```bash
-# Run evaluation only (safe, no file operations)
-python photo_migration.py
-```
-
-This creates `evaluation_log.csv` with the migration plan. **Review this file carefully** to:
-- Check duplicate detection results
-- Verify target naming scheme (YYYYMMDD_NNN format)
-- Confirm which files will be imported vs. skipped
-- Ensure the chronological ordering looks correct
-
-**Step 2: Execute Processing**
-
-After reviewing and confirming the evaluation plan is correct:
-
-```python
-# In photo_migration.py configuration section
-RUN_EVALUATE = False  # Skip re-evaluation (optional, saves time)
-RUN_PROCESS  = True   # Execute the planned operations
-```
-
-```bash
-# Execute the migration based on evaluation_log.csv
-python photo_migration.py
-```
-
-**⚠️ Important Safety Notes:**
-- Always run evaluation first with `RUN_PROCESS = False`
-- Backup your original files before enabling processing
-- The evaluation phase is completely safe and only reads files
-- Review the evaluation log thoroughly before proceeding
-
-### Output Structure
-
-```
-processed/
-├── 2019/
-│   ├── 20190604_001.jpg
-│   ├── 20190622_001.jpg
-│   └── ...
-├── 2020/
-│   ├── 20200129_001.jpg
-│   └── ...
-└── 2021/
-    ├── 20210202_001.jpg
-    ├── 20210202_002.jpg
-    └── ...
-```
-
-## 📊 Evaluation Log
-
-The `evaluation_log.csv` contains:
-
-| Column | Description |
-|--------|-------------|
-| `source` | Original file path |
-| `timestamp` | Detected date/time (EXIF or file system) |
-| `target_year` | Target year folder |
-| `target_name` | Assigned filename in format `YYYYMMDD_NNN.ext` |
-| `status` | Processing status (`pending`, `duplicate`, `done`, `error`) |
-| `convert` | Whether format conversion is needed |
-| `import` | Whether file should be imported (`True`/`False`) |
-
-## 🔍 Duplicate Detection
-
-The tool uses a two-stage approach for efficient duplicate detection:
-
-1. **Size Grouping**: Groups files by identical file size
-2. **Hash Verification**: Calculates MD5 hashes only for files with matching sizes
-
-### Duplicate Handling Rules
-
-- **Raw vs. Processed**: If a raw file duplicates an existing processed file, the raw file is skipped
-- **Raw vs. Raw**: If multiple raw files are identical, the first (chronologically) is kept, others are marked as duplicates
-- **Priority**: Processed files always take precedence over raw files
+2.  **Phase 2: Visually Similar Duplicates**
+    - This phase specifically targets compressed versions of photos (e.g., originals vs. WhatsApp copies).
+    - It filters for potential candidates based on file size (e.g., WhatsApp < 500KB, Originals > 1MB).
+    - It further filters by date, only comparing photos taken within a 10-day window of each other.
+    - Finally, it calculates a perceptual hash (`pHash`) for the remaining candidates and marks them as duplicates if they are visually similar.
 
 ## 🚀 Performance
 
-- **Efficient**: Only hashes files with matching sizes (typically <5% of total files)
-- **Progress Tracking**: Real-time progress updates every 100 files processed
-- **Memory Optimized**: Processes files in chunks to handle large collections
-- **Fast I/O**: Uses optimized file operations and chunked reading
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**FFmpeg not found**
-```bash
-# Ensure FFmpeg is in your PATH
-ffmpeg -version
-```
-
-**Permission errors**
-- Ensure write permissions to the destination directory
-- Run as administrator if needed (Windows)
-
-**Memory issues with large collections**
-- The tool is optimized for large collections but ensure adequate RAM
-- Process in smaller batches if needed
-
-**EXIF reading errors**
-- Some corrupted files may cause EXIF reading to fail
-- The tool gracefully falls back to file timestamps
-
-### Debug Mode
-
-Enable verbose logging by adding debug prints in the code or check the console output for detailed progress information.
+- **Parallel Processing**: Uses `multiprocessing` to significantly speed up metadata and image feature calculation on multi-core CPUs.
+- **Efficient Hashing**: Full-file MD5 hashing is only performed on a small subset of files that have identical sizes.
+- **Targeted Comparisons**: Visual similarity checks are heavily filtered by size and date to reduce the number of comparisons.
+- **Real-time Feedback**: `tqdm` progress bars provide clear insight into the progress of time-consuming steps.
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome! Please feel free to fork the repository, make changes, and open a pull request.
 
 ## 📄 License
 
-This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache 2.0 License - see the LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
-- [Pillow](https://python-pillow.org/) for image processing
-- [piexif](https://github.com/hMatoba/Piexif) for EXIF metadata handling
-- [pillow-heif](https://github.com/bigcat88/pillow_heif) for HEIF/HEIC support
-- [FFmpeg](https://ffmpeg.org/) for video conversion
-
-## 📞 Support
-
-If you encounter any issues or have questions:
-
-1. Check the [Troubleshooting](#troubleshooting) section
-2. Search existing [Issues](https://github.com/yourusername/photo-migration-tool/issues)
-3. Create a new issue with detailed information about your problem
-
----
-
-**⚠️ Important**: Always backup your original files before running the processing phase. The evaluation phase is safe and only reads files.
+- [Pillow](https://python-pillow.org/)
+- [piexif](https://github.com/hMatoba/Piexif)
+- [pillow-heif](https://github.com/bigcat88/pillow_heif)
+- [ffmpeg-python](https://github.com/kkroening/ffmpeg-python)
+- [NumPy](https://numpy.org/)
+- [ImageHash](https://github.com/JohannesBuchner/imagehash)
+- [tqdm](https://github.com/tqdm/tqdm)

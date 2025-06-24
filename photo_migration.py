@@ -36,9 +36,9 @@ register_heif_opener()
 # CONFIGURATION
 #==================================================================================
 
-RAW_DIRS               = [r"E:\Photos\2018", r"E:\Photos\2019", r"E:\Photos\2020", r"E:\Photos\2021", r"E:\Photos\2022", r"E:\Photos\2023", r"E:\Photos\2024"]        # Input folders
-PROCESSED_DIR          = "processed"   # Output base folder
-DUPLICATES_DIR         = r"E:\Photos\duplicate"       # Folder to move duplicates to
+RAW_DIRS               = [r"raw"]        # Input folders
+PROCESSED_DIR          = r"processed"   # Output base folder
+DUPLICATES_DIR         = r"duplicate"       # Folder to move duplicates to
 RUN_EVALUATE           = True          # Run evaluation stage
 RUN_MOVE_DUPLICATES    = True        # Run duplicate moving stage
 RUN_PROCESS            = False          # Run processing stage
@@ -118,9 +118,9 @@ def _compare_image_features(feat1, feat2):
     # Condition 1: pHash is very close. This is the primary check.
     is_similar = phash_distance <= 3
 
-    # mean_diff = np.mean(np.abs(feat1['mean'] - feat2['mean']))
-    # print(f"  Similarity match: {feat1['path'].name} vs {feat2['path'].name}")
-    # print(f"    Mean diff: {mean_diff:.2f}, pHash dist: {phash_distance}, dHash dist: {dhash_distance}, Hist corr: {hist_correlation:.3f}")
+    mean_diff = np.mean(np.abs(feat1['mean'] - feat2['mean']))
+    print(f"  Similarity match: {feat1['path'].name} vs {feat2['path'].name}")
+    print(f"    Mean diff: {mean_diff:.2f}, pHash dist: {phash_distance}, dHash dist: {dhash_distance}, Hist corr: {hist_correlation:.3f}")
     
     return is_similar
 
