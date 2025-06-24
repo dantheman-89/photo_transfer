@@ -118,9 +118,9 @@ def _compare_image_features(feat1, feat2):
     # Condition 1: pHash is very close. This is the primary check.
     is_similar = phash_distance <= 3
 
-    mean_diff = np.mean(np.abs(feat1['mean'] - feat2['mean']))
-    print(f"  Similarity match: {feat1['path'].name} vs {feat2['path'].name}")
-    print(f"    Mean diff: {mean_diff:.2f}, pHash dist: {phash_distance}, dHash dist: {dhash_distance}, Hist corr: {hist_correlation:.3f}")
+    # mean_diff = np.mean(np.abs(feat1['mean'] - feat2['mean']))
+    # print(f"  Similarity match: {feat1['path'].name} vs {feat2['path'].name}")
+    # print(f"    Mean diff: {mean_diff:.2f}, pHash dist: {phash_distance},  Hist corr: {hist_correlation:.3f}")
     
     return is_similar
 
